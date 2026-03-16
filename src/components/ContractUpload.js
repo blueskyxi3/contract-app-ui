@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -7,10 +7,6 @@ import {
   Typography,
   Grid,
   Button,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   TextField,
   Paper,
   IconButton,
@@ -40,6 +36,7 @@ const ContractUpload = () => {
     show: false,
     message: ''
   });
+  const [dragActive, setDragActive] = useState(false);
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -49,18 +46,49 @@ const ContractUpload = () => {
     }));
   };
 
-  const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    if (file) {
+  const processFile = (file) => {
+    if (file && ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+      .includes(file.type)) {
       setFormData(prev => ({
         ...prev,
         file: file
       }));
-      // Clear file error
       setErrors(prev => ({
         ...prev,
         file: ''
       }));
+    } else {
+      setErrors(prev => ({
+        ...prev,
+        file: 'Only .pdf, .doc, .docx files are allowed'
+      }));
+    }
+  };
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFile(e.dataTransfer.files[0]);
     }
   };
 
@@ -74,98 +102,69 @@ const ContractUpload = () => {
   };
 
   const handleSubmit = async () => {
-    if (validateForm()) {
-      setIsUploading(true);
+    if (!validateForm()) return;
 
-      try {
-        // Create FormData object for file upload
-        const uploadData = new FormData();
-        uploadData.append('file', formData.file);
-        uploadData.append('template', formData.template);
-        uploadData.append('contractNumber', formData.contractNumber);
-        
-        // Call API to submit form
-        const response = await fetch('https://n8n.citictel.com/webhook/contract-summary', {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-          },
-          body: uploadData,
-          mode: 'cors'
-        });
-        
-        // Get response text
-        const responseText = await response.text();
-       
-        if (!response.ok) {
-          // Try to parse error message
-          let errorDetail = '';
-          try {
-            const errorData = JSON.parse(responseText);
-            // Try multiple possible error fields
-            errorDetail = errorData.message || 
-                         errorData.error || 
-                         errorData.detail || 
-                         errorData.error_description ||
-                         (typeof errorData === 'string' ? errorData : JSON.stringify(errorData));
-          } catch {
-            errorDetail = responseText || `Server error: ${response.status} ${response.statusText}`;
-          }
-          throw new Error(errorDetail);
-        }
+    setIsUploading(true);
 
-        // Parse successful response
-        let result;
+    try {
+      const uploadData = new FormData();
+      uploadData.append('file', formData.file);
+      uploadData.append('template', formData.template);
+      uploadData.append('contractNumber', formData.contractNumber);
+
+      const response = await fetch('https://n8n.citictel.com/webhook/contract-summary', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+        },
+        body: uploadData,
+        mode: 'cors'
+      });
+
+      const responseText = await response.text();
+
+      if (!response.ok) {
+        let errorDetail = responseText;
         try {
-          result = JSON.parse(responseText);
-        } catch {
-          throw new Error('Server returned invalid JSON format');
-        }
-        
-        console.log('Upload result:', result);
-        
-        // Check if returned code is >=400
-        if (result.code >= 400) {
-          // Show error notification
-          const errorMessage = result.message || 'Upload failed, please try again later';
-          setShowError({
-            show: true,
-            message: errorMessage
-          });
-          setIsUploading(false);
-          return;
-        }
-        
-        // If code < 400, consider it successful
-        // Show success notification
-        setShowSuccess(true);
-        // Automatically close notification and return after 3 seconds
-        setTimeout(() => {
-          setShowSuccess(false);
-          navigate('/');
-        }, 3000);
-        
-      } catch (error) {
-        console.error('Upload error:', error);
-        let errorMessage = 'Upload failed';
-        
-        if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-          errorMessage = 'Network error: Unable to connect to server. Please check network connection or contact administrator.';
-        } else if (error.message) {
-          // Ensure error message is clear and readable
-          errorMessage = error.message.length > 200 
-            ? error.message.substring(0, 200) + '...' 
-            : errorMessage;
-        }
-        
-        // Show error notification
+          const errorData = JSON.parse(responseText);
+          errorDetail = errorData.message || errorData.error || errorData.detail || responseText;
+        } catch {}
+        throw new Error(errorDetail || `Server error: ${response.status}`);
+      }
+
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        throw new Error('Server returned invalid JSON format');
+      }
+
+      if (result.code >= 400) {
         setShowError({
           show: true,
-          message: errorMessage
+          message: result.message || 'Upload failed'
         });
-      } finally {
-        setIsUploading(false);
+        return;
       }
+
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        navigate('/');
+      }, 3000);
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      const message = error.message?.includes('Failed to fetch')
+        ? 'Network error: Cannot connect to server'
+        : error.message || 'Upload failed';
+      
+      setShowError({
+        show: true,
+        message: message.length > 200 ? message.substring(0, 197) + '...' : message
+      });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -173,13 +172,10 @@ const ContractUpload = () => {
     navigate('/');
   };
 
-  const handleRemoveFile = () => {
-    setFormData(prev => ({
-      ...prev,
-      file: null
-    }));
+  const handleRemoveFile = (e) => {
+    e.stopPropagation();
+    setFormData(prev => ({ ...prev, file: null }));
   };
- 
 
   return (
     <Container maxWidth="sm">
@@ -189,13 +185,16 @@ const ContractUpload = () => {
             <Typography variant="h6" gutterBottom align="center">
               Contract Upload
             </Typography>
-            
+
             <Grid container spacing={3}>
-              {/* 文件上传区域 - 上方 */}
               <Grid item xs={12}>
                 <Box sx={{ mb: 1 }}>
                   <Paper
                     variant="outlined"
+                    onDragEnter={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDragOver={handleDrag}
+                    onDrop={handleDrop}
                     sx={{
                       p: 3,
                       display: 'flex',
@@ -203,14 +202,20 @@ const ContractUpload = () => {
                       justifyContent: 'center',
                       flexDirection: 'column',
                       minHeight: 180,
-                      border: errors.file ? '1px solid #f44336' : '1px dashed rgba(0, 0, 0, 0.23)',
-                      bgcolor: 'rgba(0, 0, 0, 0.02)',
-                      cursor: 'pointer',
-                      '&:hover': {
-                        bgcolor: 'rgba(0, 0, 0, 0.04)'
+                      border: dragActive 
+                        ? '2px dashed #1976d2' 
+                        : errors.file 
+                          ? '2px solid #f44336' 
+                          : '1px dashed rgba(0, 0, 0, 0.23)',
+                      bgcolor: dragActive ? 'rgba(25, 118, 210, 0.08)' : 'rgba(0, 0, 0, 0.02)',
+                      transition: 'all 0.2s',
+                      cursor: formData.file ? 'default' : 'pointer',
+                      '&:hover': formData.file ? {} : {
+                        bgcolor: 'rgba(0, 0, 0, 0.04)',
+                        borderColor: 'rgba(0, 0, 0, 0.4)'
                       }
                     }}
-                    onClick={() => !formData.file && document.getElementById('file-upload').click()}
+                    onClick={() => !formData.file && document.getElementById('file-upload')?.click()}
                   >
                     {formData.file ? (
                       <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', p: 2 }}>
@@ -225,19 +230,27 @@ const ContractUpload = () => {
                         </Box>
                         <IconButton 
                           size="small" 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemoveFile();
-                          }}
+                          onClick={handleRemoveFile}
                         >
                           <CloseIcon />
                         </IconButton>
                       </Box>
                     ) : (
                       <>
-                        <UploadIcon sx={{ fontSize: 48, color: 'rgba(0, 0, 0, 0.23)', mb: 2 }} />
-                        <Typography variant="body2" color="textSecondary" gutterBottom align="center">
-                          Click or drag file here to upload
+                        <UploadIcon 
+                          sx={{ 
+                            fontSize: 48, 
+                            color: dragActive ? '#1976d2' : 'rgba(0, 0, 0, 0.23)', 
+                            mb: 2 
+                          }} 
+                        />
+                        <Typography 
+                          variant="body1" 
+                          color={dragActive ? 'primary' : 'textSecondary'} 
+                          gutterBottom 
+                          align="center"
+                        >
+                          {dragActive ? 'Drop file here' : 'Click or drag file here to upload'}
                         </Typography>
                         <Typography variant="caption" color="textSecondary" align="center" sx={{ mb: 2 }}>
                           Supported formats: .pdf, .doc, .docx
@@ -249,37 +262,42 @@ const ContractUpload = () => {
                           style={{ display: 'none' }}
                           onChange={handleFileChange}
                         />
-                        <Button variant="contained" component="span">
+                        <Button 
+                          variant="contained" 
+                          component="span"
+                          disableElevation
+                        >
                           Select File
                         </Button>
                       </>
                     )}
                   </Paper>
-                  {errors.file && (
-                    <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
-                      {errors.file}
+
+                  {(errors.file || dragActive) && (
+                    <Typography 
+                      variant="caption" 
+                      color={dragActive ? 'primary' : 'error'} 
+                      sx={{ mt: 1, display: 'block' }}
+                    >
+                      {dragActive ? 'Release to upload' : errors.file}
                     </Typography>
                   )}
                 </Box>
               </Grid>
-              
-              {/* e-Register/VOSS区域 - 下方 */}
+
               <Grid item xs={12}>
-                <Box sx={{ mb: 1 }}>
-                  <TextField
-                    fullWidth
-                    id="contractNumber"
-                    name="contractNumber"
-                    label="e-Register/VOSS Number"
-                    value={formData.contractNumber}
-                    onChange={handleInputChange}
-                    variant="outlined"
-                    size="medium"
-                  />
-                </Box>
+                <TextField
+                  fullWidth
+                  id="contractNumber"
+                  name="contractNumber"
+                  label="e-Register/VOSS Number"
+                  value={formData.contractNumber}
+                  onChange={handleInputChange}
+                  variant="outlined"
+                  size="medium"
+                />
               </Grid>
-              
-              {/* 按钮区域 */}
+
               <Grid item xs={12}>
                 <Box sx={{ 
                   display: 'flex', 
@@ -309,8 +327,7 @@ const ContractUpload = () => {
           </CardContent>
         </Card>
       </Box>
-      
-      {/* Loading overlay during upload */}
+
       <Backdrop
         sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.drawer + 1 }}
         open={isUploading}
@@ -322,8 +339,7 @@ const ContractUpload = () => {
           </Typography>
         </Box>
       </Backdrop>
-      
-      {/* Success notification */}
+
       <Snackbar
         open={showSuccess}
         autoHideDuration={3000}
@@ -331,11 +347,10 @@ const ContractUpload = () => {
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
         <Alert onClose={() => setShowSuccess(false)} severity="success" sx={{ width: '100%' }}>
-          Contract uploaded successfully! Auto returning to list page in 3 seconds...
+          Contract uploaded successfully! Auto returning in 3 seconds...
         </Alert>
       </Snackbar>
 
-      {/* Error notification */}
       <Snackbar
         open={showError.show}
         autoHideDuration={6000}
