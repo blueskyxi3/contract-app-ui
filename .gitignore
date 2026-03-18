@@ -1,3 +1,4 @@
 .vscode/
+.roo/
 .env.local
 node_modules

@@ -285,7 +285,7 @@ const ContractManagement = () => {
     }
     
     setProcessLog(`Contract Process Log - ID: ${id}
-e-Register/VOSS Number: ${contract?.code || 'Unknown'}
+Contract Number: ${contract?.code || 'Unknown'}
 Current Status: ${statusText}
 Creation Date: ${contract?.processDate || 'Unknown'}
 Disclosing Party: ${contract?.disclosing_party || 'Unknown'}
@@ -322,7 +322,7 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
               fullWidth
               id="code-filter"
               name="code"
-              label="e-Register/VOSS Number"
+              label="Contract Number"
               value={filters.code}
               onChange={handleFilterChange}
             />
@@ -374,7 +374,7 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
           <Table size="small" sx={{'& .MuiTableCell-root': {py: 0.5}}}>
             <TableHead>
               <TableRow>
-                <TableCell>e-Register/VOSS Number</TableCell>
+                <TableCell>Contract Number</TableCell>
                 {/* 移除了Type列 */}
                 <TableCell>Status</TableCell>
                 <TableCell>Process Date</TableCell>
@@ -496,7 +496,7 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
               <Grid container spacing={2}>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="text.secondary">
-                    e-Register/VOSS Number:
+                    Contract Number:
                   </Typography>
                   <Typography variant="body1" fontWeight="medium">
                     {deleteContractInfo.code}

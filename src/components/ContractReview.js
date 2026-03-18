@@ -437,7 +437,7 @@ const ContractReview = () => {
                 <Box>
                   <Typography variant="h6" gutterBottom>
                     <DescriptionIcon />
-                    Contract e-Register/VOSS Number
+                    Contract Number
                   </Typography>
                   <TableContainer component={Paper} variant="outlined">
                     <Table>

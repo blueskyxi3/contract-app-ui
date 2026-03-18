@@ -290,7 +290,7 @@ const ContractUpload = () => {
                   fullWidth
                   id="contractNumber"
                   name="contractNumber"
-                  label="e-Register/VOSS Number"
+                  label="Contract Number"
                   value={formData.contractNumber}
                   onChange={handleInputChange}
                   variant="outlined"
