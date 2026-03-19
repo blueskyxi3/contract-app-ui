@@ -21,7 +21,16 @@ import {
   Breadcrumbs,
   Link,
   Alert,
-  Snackbar
+  Snackbar,
+  useTheme,
+  useMediaQuery,
+  Stack,
+  CardHeader,
+  IconButton,
+  Collapse,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import {
   ArrowBack as BackIcon,
@@ -32,8 +41,11 @@ import {
   Gavel as GavelIcon,
   Assignment as AssignmentIcon,
   CalendarToday as CalendarIcon,
-  Download as DownloadIcon
+  Download as DownloadIcon,
+  ExpandMore as ExpandMoreIcon,
+  Info as InfoIcon
 } from '@mui/icons-material';
+import MenuItem from '@mui/material/MenuItem';
 
 // Status mapping
 const statusMap = {
@@ -47,6 +59,15 @@ const statusMap = {
 const ContractReview = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('lg'));
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  
+  // Log the ID immediately when component mounts
+  console.log('ContractReview component mounted');
+  console.log('ID from URL params:', id);
+  console.log('ID type:', typeof id);
+  
   const [contract, setContract] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,13 +110,19 @@ const ContractReview = () => {
 
   useEffect(() => {
     const fetchContract = async () => {
+      // Validate ID before making API call
+      if (!id || id === 'undefined' || id === 'null') {
+        console.error('Invalid contract ID in URL:', id);
+        setError('Invalid contract ID. Please return to the contract list and try again.');
+        setIsLoading(false);
+        return;
+      }
+      
       setIsLoading(true);
       try {
-        // Build request URL
         const requestUrl = `https://n8n.citictel.com/webhook/contract?id=${id}`;
         console.log('Request URL:', requestUrl);
 
-        // Send request
         const response = await fetch(requestUrl, {
           method: 'GET',
           headers: {
@@ -111,11 +138,9 @@ const ContractReview = () => {
           throw new Error(`Query failed: ${response.status} ${response.statusText}`);
         }
 
-        // Check response content type
         const contentType = response.headers.get('content-type');
         console.log('Response content type:', contentType);
 
-        // Get response text first, then try to parse
         const responseText = await response.text();
         console.log('Raw response text:', responseText);
 
@@ -132,13 +157,38 @@ const ContractReview = () => {
         }
 
         console.log('Contract data fetched successfully:', data);
+        console.log('Data type:', typeof data);
+        console.log('Is array:', Array.isArray(data));
+        console.log('Data keys:', Object.keys(data));
 
-        // Process returned data
+        // Process returned data - support multiple response formats
+        let contractData = null;
+        
         if (Array.isArray(data) && data.length > 0) {
-          const contractData = data[0];
+          // Array format
+          contractData = data[0];
+          console.log('Using array format, contractData:', contractData);
+        } else if (data && typeof data === 'object') {
+          // Object format - check for common field names
+          if (data.rows && Array.isArray(data.rows) && data.rows.length > 0) {
+            contractData = data.rows[0];
+            console.log('Using rows format, contractData:', contractData);
+          } else if (data.contracts && Array.isArray(data.contracts) && data.contracts.length > 0) {
+            contractData = data.contracts[0];
+            console.log('Using contracts format, contractData:', contractData);
+          } else if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+            contractData = data.data[0];
+            console.log('Using data format, contractData:', contractData);
+          } else if (data.id || data.contract_no) {
+            // Single contract object
+            contractData = data;
+            console.log('Using single object format, contractData:', contractData);
+          }
+        }
+
+        if (contractData) {
           setContract(contractData);
           
-          // Initialize form data, including contract summary information
           setFormData(prev => ({
             ...prev,
             client_party: contractData.client_party || '',
@@ -166,7 +216,11 @@ const ContractReview = () => {
             service_fees: contractData.service_fees || '',
             remarks: contractData.remarks || '',
           }));
+          
+          console.log('Contract state set successfully:', contractData);
         } else {
+          console.error('Could not extract contract data from response');
+          console.error('Full response structure:', JSON.stringify(data, null, 2));
           throw new Error('Specified contract not found');
         }
       } catch (error) {
@@ -188,56 +242,6 @@ const ContractReview = () => {
     }));
   };
 
-  // Build summary data object for download
-  const buildSummaryData = () => {
-    return {
-      contract_summary: {
-        // Basic contract information
-        contract_no: contract?.contract_no || '',
-        contract_type: contract?.contract_type || '',
-        contract_status: contract?.contract_status || '',
-        auditor: contract?.auditor || '',
-        created_at: contract?.created_at || '',
-
-        // Contract summary data
-        client_party: formData.client_party,
-        receiving_party: formData.receiving_party,
-        party_country: formData.party_country,
-        party_type: formData.party_type,
-        contract_summary: formData.contract_summary,
-        confidentiality_period: formData.confidentiality_period,
-        arbitration_law: formData.arbitration_law,
-        
-        // 新增字段
-        effective_date_applicable: formData.effective_date_applicable,
-        effective_date: formData.effective_date,
-        new_existing: formData.new_existing,
-        end_date_applicable: formData.end_date_applicable,
-        company_search: formData.company_search,
-        account_manager: formData.account_manager,
-        sanction_check: formData.sanction_check,
-        standard_template: formData.standard_template,
-        payment_terms: formData.payment_terms,
-        credit_limit: formData.credit_limit,
-        limitation_liability: formData.limitation_liability,
-        force_majeure: formData.force_majeure,
-        indemnification: formData.indemnification,
-        special_commercial: formData.special_commercial,
-        service_fees: formData.service_fees,
-        remarks: formData.remarks,
-        
-        // Download timestamp
-        download_time: new Date().toISOString()
-      }
-    };
-  };
-
-  // Handle download summary
-  const handleDownloadSummary = () => {
-    window.open(`https://n8n.citictel.com/webhook/contract/excel?id=${id}`, '_blank');
-  };
-
-  // Format date
   const formatDate = (dateString) => {
     if (!dateString) return '';
     const date = new Date(dateString);
@@ -250,7 +254,6 @@ const ContractReview = () => {
 
   const handleDownload = () => {
     if (contract && contract.link) {
-      // Open new tab to download contract
       window.open(contract.link, '_blank');
     } else {
       setSnackbar({
@@ -261,16 +264,26 @@ const ContractReview = () => {
     }
   };
 
+  const handleDownloadSummary = () => {
+    window.open(`https://n8n.citictel.com/webhook/contract/excel?id=${id}`, '_blank');
+  };
+
   const handleCloseSnackbar = () => {
     setSnackbar(prev => ({ ...prev, open: false }));
   };
 
   if (isLoading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
-        <CircularProgress size={24} />
-        <Typography variant="h6" sx={{ ml: 2 }}>
-          Loading...
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: 'calc(100vh - 128px)',
+        flexDirection: 'column'
+      }}>
+        <CircularProgress size={60} thickness={4} />
+        <Typography variant="h6" sx={{ mt: 3, fontWeight: 600 }}>
+          Loading contract...
         </Typography>
       </Box>
     );
@@ -278,14 +291,26 @@ const ContractReview = () => {
 
   if (error && !contract) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h6" color="error">
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 'calc(100vh - 128px)',
+        p: 3
+      }}>
+        <InfoIcon sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
+        <Typography variant="h6" color="error" sx={{ mb: 2 }}>
           Error: {error}
         </Typography>
         <Button
           variant="contained"
           onClick={handleBack}
-          sx={{ mt: 2 }}
+          startIcon={<BackIcon />}
+          sx={{ 
+            fontWeight: 600,
+            borderRadius: 2
+          }}
         >
           Back to Contract List
         </Button>
@@ -295,17 +320,18 @@ const ContractReview = () => {
 
   if (!contract) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h6">
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 'calc(100vh - 128px)',
+        p: 3
+      }}>
+        <InfoIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+        <Typography variant="h6" color="text.secondary">
           Contract information not found
         </Typography>
-        <Button
-          variant="contained"
-          onClick={handleBack}
-          sx={{ mt: 2 }}
-        >
-          Back to Contract List
-        </Button>
       </Box>
     );
   }
@@ -322,60 +348,98 @@ const ContractReview = () => {
         <Alert
           onClose={handleCloseSnackbar}
           severity={snackbar.severity}
-          sx={{ width: '100%' }}
+          sx={{ 
+            width: '100%',
+            borderRadius: 2
+          }}
         >
           {snackbar.message}
         </Alert>
       </Snackbar>
 
-      {/* Breadcrumb navigation */}
-      <Breadcrumbs aria-label="breadcrumb" sx={{ mb: 2 }}>
-        <Link color="inherit" href="/contracts">
-          Contract List
-        </Link>
-        <Typography color="textPrimary">Contract Review</Typography>
-      </Breadcrumbs>
-
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <Button
-          startIcon={<BackIcon />}
-          onClick={handleBack}
-          sx={{ mr: 2 }}
-        >
-          Back
-        </Button>
-        <Typography variant="h5">
-          Contract Review
-        </Typography>
+      {/* Header */}
+      <Box sx={{ mb: 3 }}>
+        {!isSmallScreen && (
+          <Breadcrumbs aria-label="breadcrumb" sx={{ mb: 2 }}>
+            <Link 
+              color="inherit" 
+              onClick={handleBack}
+              sx={{ cursor: 'pointer', '&:hover': { color: 'primary.main' } }}
+            >
+              Contract List
+            </Link>
+            <Typography color="text.primary">Contract Review</Typography>
+          </Breadcrumbs>
+        )}
+        
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 2
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Button
+              startIcon={<BackIcon />}
+              onClick={handleBack}
+              sx={{ 
+                fontWeight: 600,
+                borderRadius: 2
+              }}
+            >
+              Back
+            </Button>
+            <Box>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                Contract Review
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {contract.contract_no || 'Unknown Contract'}
+              </Typography>
+            </Box>
+          </Box>
+          
+          <Chip
+            label={statusMap[contract.contract_status?.toLowerCase()]?.label || contract.contract_status}
+            color={statusMap[contract.contract_status?.toLowerCase()]?.color || 'default'}
+            size="small"
+            sx={{ 
+              fontWeight: 600,
+              borderRadius: 2
+            }}
+          />
+        </Box>
       </Box>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
-
-      <Card>
-        <CardContent>
-          <Grid container spacing={3}>
-            {/* Left: Contract original file display */}
-            <Grid item xs={12} md={7}>
-              <Typography variant="h6" gutterBottom>
-                <DescriptionIcon />
-                Contract Original File
-              </Typography>
+      {/* Main Content */}
+      <Grid container spacing={3}>
+        {/* Left: Contract original file display */}
+        <Grid item xs={12} lg={7}>
+          <Card sx={{ boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+            <CardHeader
+              title={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <DescriptionIcon />
+                  <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    Contract Document
+                  </Typography>
+                </Box>
+              }
+            />
+            <CardContent sx={{ pt: 0 }}>
               <Paper 
                 variant="outlined" 
                 sx={{ 
-                  height: 'fit-content',
-                  minHeight: '1200px',
+                  height: isMobile ? '600px' : '800px',
                   display: 'flex', 
                   flexDirection: 'column', 
-                  overflow: 'hidden' 
+                  overflow: 'hidden',
+                  borderRadius: 2
                 }}
               >
                 {contract.link ? (
-                  <Box sx={{ flex: 1, overflow: 'hidden', p: 2 }}>
+                  <Box sx={{ flex: 1, overflow: 'hidden' }}>
                     {contract.link.endsWith('.pdf') ? (
                       <iframe
                         src={contract.link}
@@ -384,32 +448,35 @@ const ContractReview = () => {
                         title="Contract PDF File"
                         style={{ 
                           border: 'none',
-                          minHeight: '1100px'
                         }}
                       />
                     ) : (
                       <Box sx={{ 
                         textAlign: 'center', 
                         p: 4,
-                        minHeight: '1100px',
+                        height: '100%',
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'center',
                         alignItems: 'center'
                       }}>
-                        <Typography variant="body1" gutterBottom>
-                          Contract file type: {contract.link.split('.').pop().toUpperCase()}
+                        <DescriptionIcon sx={{ fontSize: 64, color: 'primary.main', mb: 2 }} />
+                        <Typography variant="h6" gutterBottom>
+                          {contract.link.split('.').pop().toUpperCase()} File
                         </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          Click the button below to download and view the contract file
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                          Click button below to download and view contract file
                         </Typography>
                         <Button
                           variant="contained"
-                          startIcon={<DescriptionIcon />}
+                          startIcon={<DownloadIcon />}
                           onClick={handleDownload}
-                          sx={{ mt: 2 }}
+                          sx={{ 
+                            fontWeight: 600,
+                            borderRadius: 2
+                          }}
                         >
-                          Download Contract File
+                          Download Contract
                         </Button>
                       </Box>
                     )}
@@ -419,437 +486,417 @@ const ContractReview = () => {
                     display: 'flex', 
                     justifyContent: 'center', 
                     alignItems: 'center', 
-                    height: '100%',
-                    minHeight: '1100px'
+                    height: '100%'
                   }}>
-                    <Typography variant="body1" color="textSecondary">
-                      No contract file link
-                    </Typography>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <DescriptionIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+                      <Typography variant="body1" color="text.disabled">
+                        No contract file link
+                      </Typography>
+                    </Box>
                   </Box>
                 )}
               </Paper>
-            </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
 
-            {/* Right: Contract basic information and summary information */}
-            <Grid item xs={12} md={5}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
-                {/* Contract basic information */}
-                <Box>
-                  <Typography variant="h6" gutterBottom>
-                    <DescriptionIcon />
-                    Contract Number
+        {/* Right: Contract summary information */}
+        <Grid item xs={12} lg={5}>
+          <Card sx={{ boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+            <CardHeader
+              title={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AssignmentIcon />
+                  <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    Contract Summary
                   </Typography>
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table>
-                      <TableBody>
-                        <TableRow>
-                          <TableCell>
-                            {contract.contract_no}
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
                 </Box>
+              }
+            />
+            <CardContent sx={{ pt: 0 }}>
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  p: 2, 
+                  maxHeight: isMobile ? '600px' : '800px',
+                  overflow: 'auto',
+                  borderRadius: 2
+                }}
+              >
+                <Grid container spacing={2}>
+                  {/* Section 1: Parties Information */}
+                  <Grid item xs={12}>
+                    <Accordion defaultExpanded>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          <PersonIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                          Parties Information
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Client Party"
+                              name="client_party"
+                              value={formData.client_party}
+                              onChange={handleInputChange}
+                              placeholder="Enter disclosing party information"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Receiving Party"
+                              name="receiving_party"
+                              value={formData.receiving_party}
+                              onChange={handleInputChange}
+                              placeholder="Enter receiving party information"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="Party Country"
+                              name="party_country"
+                              value={formData.party_country}
+                              onChange={handleInputChange}
+                              placeholder="Country/Region"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="Party Type"
+                              name="party_type"
+                              value={formData.party_type}
+                              onChange={handleInputChange}
+                              placeholder="Designation"
+                              size="small"
+                            />
+                          </Grid>
+                        </Grid>
+                      </AccordionDetails>
+                    </Accordion>
+                  </Grid>
 
-                {/* Contract summary information - now editable */}
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="h6" gutterBottom>
-                    <AssignmentIcon />
-                    Contract Summary Information
-                  </Typography>
-                  <Paper 
-                    variant="outlined" 
-                    sx={{ 
-                      p: 2, 
-                      height: '1100px',
-                      overflow: 'auto' 
-                    }}
-                  >
-                    <Grid container spacing={2}>
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          <PersonIcon />
-                          Name of the parties to the contract
+                  {/* Section 2: Contract Details */}
+                  <Grid item xs={12}>
+                    <Accordion defaultExpanded>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          <DescriptionIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                          Contract Details
                         </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="client_party"
-                          value={formData.client_party}
-                          onChange={handleInputChange}
-                          placeholder="Enter disclosing party information"
-                        />
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          sx={{ mt: 1 }}
-                          name="receiving_party"
-                          value={formData.receiving_party}
-                          onChange={handleInputChange}
-                          placeholder="Enter receiving party information"
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          <PublicIcon />
-                          Counterparty's country/ region
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="party_country"
-                          value={formData.party_country}
-                          onChange={handleInputChange}
-                          placeholder="Enter counterparty country/region"
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          <BusinessIcon />
-                          Counterparty's designation
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="party_type"
-                          value={formData.party_type}
-                          onChange={handleInputChange}
-                          placeholder="Enter counterparty designation (e.g., customer, supplier, etc.)"
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          <DescriptionIcon />
-                          Brief service description of this contract
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="contract_summary"
-                          value={formData.contract_summary}
-                          onChange={handleInputChange}
-                          placeholder="Enter brief service description of the contract"
-                        />
-                      </Grid>
-                      
-                      {/* 新增的字段 */}
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Effective Date Applicable
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="effective_date_applicable"
-                          value={formData.effective_date_applicable}
-                          onChange={handleInputChange}
-                          placeholder="Enter effective date applicability"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Effective Date
-                        </Typography>
-                        <TextField
-                          fullWidth
-                       
-                          name="effective_date"
-                          value={formData.effective_date_str}
-                          onChange={handleInputChange}
-                          InputLabelProps={{
-                            shrink: true,
-                          }}
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          New/Existing
-                        </Typography>
-                        <TextField
-                          select
-                          fullWidth
-                          name="new_existing"
-                          value={formData.new_existing}
-                          onChange={handleInputChange}
-                          SelectProps={{
-                            native: true,
-                          }}
-                        >
-                          <option value=""></option>
-                          <option value="新">新</option>
-                          <option value="已存在">已存在</option>
-                        </TextField>
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          End Date Applicable
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="end_date_applicable"
-                          value={formData.end_date_applicable}
-                          onChange={handleInputChange}
-                          placeholder="Enter end date applicability"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Company Search
-                        </Typography>
-                        <TextField
-                          select
-                          fullWidth
-                          name="company_search"
-                          value={formData.company_search}
-                          onChange={handleInputChange}
-                          SelectProps={{
-                            native: true,
-                          }}
-                        >
-                          <option value=""></option>
-                          <option value="有">有</option>
-                          <option value="没有">没有</option>
-                        </TextField>
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Account Manager
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="account_manager"
-                          value={formData.account_manager}
-                          onChange={handleInputChange}
-                          placeholder="Enter account manager"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Sanction Check
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="sanction_check"
-                          value={formData.sanction_check}
-                          onChange={handleInputChange}
-                          placeholder="Enter sanction check details"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Standard Template
-                        </Typography>
-                        <TextField
-                          select
-                          fullWidth
-                          name="standard_template"
-                          value={formData.standard_template}
-                          onChange={handleInputChange}
-                          SelectProps={{
-                            native: true,
-                          }}
-                        >
-                          <option value=""></option>
-                          <option value="是">是</option>
-                          <option value="否">否</option>
-                        </TextField>
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Payment Terms
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="payment_terms"
-                          value={formData.payment_terms}
-                          onChange={handleInputChange}
-                          placeholder="Enter payment terms"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Credit Limit
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="credit_limit"
-                          value={formData.credit_limit}
-                          onChange={handleInputChange}
-                          placeholder="Enter credit limit"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Limitation of Liability
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="limitation_liability"
-                          value={formData.limitation_liability}
-                          onChange={handleInputChange}
-                          placeholder="Enter limitation of liability details"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Force Majeure
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="force_majeure"
-                          value={formData.force_majeure}
-                          onChange={handleInputChange}
-                          placeholder="Enter force majeure clause"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Indemnification
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="indemnification"
-                          value={formData.indemnification}
-                          onChange={handleInputChange}
-                          placeholder="Enter indemnification clause"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Special Commercial Terms
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="special_commercial"
-                          value={formData.special_commercial}
-                          onChange={handleInputChange}
-                          placeholder="Enter special commercial terms"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Service Fees
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          name="service_fees"
-                          value={formData.service_fees}
-                          onChange={handleInputChange}
-                          placeholder="Enter service fees"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          <CalendarIcon />
-                          Contract Period/ Additional Information
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="confidentiality_period"
-                          value={formData.confidentiality_period}
-                          onChange={handleInputChange}
-                          placeholder="Enter contract period/additional information"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          <GavelIcon />
-                          Limitation of liability
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={2}
-                          name="arbitration_law"
-                          value={formData.arbitration_law}
-                          onChange={handleInputChange}
-                          placeholder="Enter limitation of liability clause"
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Remarks
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          rows={3}
-                          name="remarks"
-                          value={formData.remarks}
-                          onChange={handleInputChange}
-                          placeholder="Enter any remarks"
-                        />
-                      </Grid>
-                    </Grid>
-                  </Paper>
-                </Box>
-              </Box>
-            </Grid>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Contract Summary"
+                              name="contract_summary"
+                              value={formData.contract_summary}
+                              onChange={handleInputChange}
+                              placeholder="Brief service description"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="Effective Date"
+                              name="effective_date"
+                              value={formData.effective_date}
+                              onChange={handleInputChange}
+                              placeholder="Effective date"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="New/Existing"
+                              name="new_existing"
+                              value={formData.new_existing}
+                              onChange={handleInputChange}
+                              select
+                              size="small"
+                            >
+                              <MenuItem value="">Select</MenuItem>
+                              <MenuItem value="新">New (新)</MenuItem>
+                              <MenuItem value="已存在">Existing (已存在)</MenuItem>
+                            </TextField>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              label="Confidentiality Period"
+                              name="confidentiality_period"
+                              value={formData.confidentiality_period}
+                              onChange={handleInputChange}
+                              placeholder="Contract period"
+                              size="small"
+                            />
+                          </Grid>
+                        </Grid>
+                      </AccordionDetails>
+                    </Accordion>
+                  </Grid>
 
-            <Grid item xs={12}>
-              <Divider sx={{ my: 2 }} />
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-                <Button
-                  variant="outlined"
-                  onClick={handleDownload}
-                  sx={{ mr: 2 }}
-                  disabled={isSubmitting}
-                  startIcon={<DownloadIcon />}
-                >
-                  Download Contract
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={handleBack}
-                  sx={{ mr: 2 }}
-                  disabled={isSubmitting}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleDownloadSummary}
-                  disabled={isSubmitting}
-                  startIcon={<DownloadIcon />}
-                >
-                  Download Summary
-                </Button>
-              </Box>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
+                  {/* Section 3: Business Terms */}
+                  <Grid item xs={12}>
+                    <Accordion>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          <BusinessIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                          Business Terms
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Grid container spacing={2}>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="Company Search"
+                              name="company_search"
+                              value={formData.company_search}
+                              onChange={handleInputChange}
+                              select
+                              size="small"
+                            >
+                              <MenuItem value="">Select</MenuItem>
+                              <MenuItem value="有">Yes (有)</MenuItem>
+                              <MenuItem value="没有">No (没有)</MenuItem>
+                            </TextField>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="Account Manager"
+                              name="account_manager"
+                              value={formData.account_manager}
+                              onChange={handleInputChange}
+                              placeholder="Manager"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              label="Sanction Check"
+                              name="sanction_check"
+                              value={formData.sanction_check}
+                              onChange={handleInputChange}
+                              placeholder="Sanction check details"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="Standard Template"
+                              name="standard_template"
+                              value={formData.standard_template}
+                              onChange={handleInputChange}
+                              select
+                              size="small"
+                            >
+                              <MenuItem value="">Select</MenuItem>
+                              <MenuItem value="是">Yes (是)</MenuItem>
+                              <MenuItem value="否">No (否)</MenuItem>
+                            </TextField>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <TextField
+                              fullWidth
+                              label="Service Fees"
+                              name="service_fees"
+                              value={formData.service_fees}
+                              onChange={handleInputChange}
+                              placeholder="Service fees"
+                              size="small"
+                            />
+                          </Grid>
+                        </Grid>
+                      </AccordionDetails>
+                    </Accordion>
+                  </Grid>
+
+                  {/* Section 4: Legal Terms */}
+                  <Grid item xs={12}>
+                    <Accordion>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          <GavelIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                          Legal Terms
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Payment Terms"
+                              name="payment_terms"
+                              value={formData.payment_terms}
+                              onChange={handleInputChange}
+                              placeholder="Payment terms"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Limitation of Liability"
+                              name="limitation_liability"
+                              value={formData.limitation_liability}
+                              onChange={handleInputChange}
+                              placeholder="Liability limitations"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Force Majeure"
+                              name="force_majeure"
+                              value={formData.force_majeure}
+                              onChange={handleInputChange}
+                              placeholder="Force majeure clause"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Indemnification"
+                              name="indemnification"
+                              value={formData.indemnification}
+                              onChange={handleInputChange}
+                              placeholder="Indemnification clause"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              label="Arbitration Law"
+                              name="arbitration_law"
+                              value={formData.arbitration_law}
+                              onChange={handleInputChange}
+                              placeholder="Governing law"
+                              size="small"
+                            />
+                          </Grid>
+                        </Grid>
+                      </AccordionDetails>
+                    </Accordion>
+                  </Grid>
+
+                  {/* Section 5: Additional Information */}
+                  <Grid item xs={12}>
+                    <Accordion>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          <InfoIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                          Additional Information
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={2}
+                              label="Special Commercial Terms"
+                              name="special_commercial"
+                              value={formData.special_commercial}
+                              onChange={handleInputChange}
+                              placeholder="Special commercial terms"
+                              size="small"
+                            />
+                          </Grid>
+                          <Grid item xs={12}>
+                            <TextField
+                              fullWidth
+                              multiline
+                              rows={3}
+                              label="Remarks"
+                              name="remarks"
+                              value={formData.remarks}
+                              onChange={handleInputChange}
+                              placeholder="Additional remarks"
+                              size="small"
+                            />
+                          </Grid>
+                        </Grid>
+                      </AccordionDetails>
+                    </Accordion>
+                  </Grid>
+                </Grid>
+              </Paper>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Action Buttons */}
+        <Grid item xs={12}>
+          <Divider sx={{ my: 3 }} />
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: { xs: 'flex-start', md: 'flex-end' },
+            flexWrap: 'wrap',
+            gap: 2
+          }}>
+            <Button
+              variant="outlined"
+              onClick={handleDownload}
+              disabled={isSubmitting}
+              startIcon={<DownloadIcon />}
+              sx={{ 
+                fontWeight: 600,
+                borderRadius: 2
+              }}
+            >
+              Download Contract
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleDownloadSummary}
+              disabled={isSubmitting}
+              startIcon={<DownloadIcon />}
+              sx={{ 
+                fontWeight: 600,
+                borderRadius: 2
+              }}
+            >
+              Download Summary
+            </Button>
+          </Box>
+        </Grid>
+      </Grid>
     </Box>
   );
 };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CircularProgress, Backdrop } from '@mui/material';
+import { CircularProgress, Backdrop, useTheme, useMediaQuery } from '@mui/material';
+import PageTransition from './PageTransition';
 import {
   Box,
   Card,
@@ -27,7 +28,9 @@ import {
   DialogContent,
   DialogActions,
   Typography,
-  TablePagination
+  Alert,
+  Stack,
+  Chip as MuiChip
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
@@ -35,7 +38,8 @@ import {
   Visibility as ReviewIcon,
   Info as InfoIcon,
   Warning as WarningIcon,
-  GetApp as ExcelIcon
+  GetApp as ExcelIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 
 // Status mapping
@@ -47,11 +51,14 @@ const statusMap = {
 
 const ContractManagement = () => {
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  
   const [contracts, setContracts] = useState([]);
   const [filters, setFilters] = useState({
     status: '',
     code: ''
-    // 移除了type字段
   });
   const [logDialogOpen, setLogDialogOpen] = useState(false);
   const [processLog, setProcessLog] = useState('');
@@ -66,10 +73,12 @@ const ContractManagement = () => {
   const [contractToDelete, setContractToDelete] = useState(null);
   const [deleteContractInfo, setDeleteContractInfo] = useState({});
   const [isDeleting, setIsDeleting] = useState(false);
-
+  const [showPage, setShowPage] = useState(false);
+  
   useEffect(() => {
     // Initial data load
     fetchContracts();
+    setShowPage(true);
   }, []);
   
   // Fetch contract data
@@ -87,7 +96,6 @@ const ContractManagement = () => {
       if (currentFilters.status) {
         params.append('contract_status', currentFilters.status);
       }
-      // 移除了type的查询条件
       if (currentFilters.code) {
         params.append('contract_no', currentFilters.code);
       }
@@ -123,7 +131,10 @@ const ContractManagement = () => {
       let contracts = [];
       let total = 0;
       
-      if (data.contracts && Array.isArray(data.contracts)) {
+      if (data.rows && Array.isArray(data.rows)) {
+        contracts = data.rows;
+        total = data.total || contracts.length;
+      } else if (data.contracts && Array.isArray(data.contracts)) {
         contracts = data.contracts;
         total = data.total || contracts.length;
       } else if (Array.isArray(data)) {
@@ -132,7 +143,7 @@ const ContractManagement = () => {
           contracts = [];
           total = 0;
         } else {
-          total = contracts.length;
+          total = data.total;
         }
       } else if (data.data && Array.isArray(data.data)) {
         contracts = data.data;
@@ -147,12 +158,11 @@ const ContractManagement = () => {
           ...contract,
           // Ensure status field exists and is valid, mapped to lowercase
           status: (contract.contract_status || contract.status || 'initialized').toLowerCase(),
-          id: contract.id,
+          // Ensure there's always a valid ID - use contract_no or generate one if needed
+          id: contract.id || contract.contract_no || contract.code || `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           code: contract.contract_no || contract.code || `CT-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`,
-          // type字段仍然保留在数据中，但不再显示在界面上
           type: contract.contract_type || contract.type || 'Confidentiality Agreement',
           processDate: contract.processDate || contract.created_at || new Date().toISOString().split('T')[0],
-
           // Add other real data fields
           link: contract.link || '',
           disclosing_party: contract.disclosing_party || '',
@@ -161,7 +171,8 @@ const ContractManagement = () => {
           party_type: contract.party_type || '',
           contract_summary: contract.contract_summary || '',
           confidentiality_period: contract.confidentiality_period || '',
-          arbitration_law: contract.arbitration_law || ''
+          arbitration_law: contract.arbitration_law || '',
+          auditor: contract.auditor || ''
         }));
       } else {
         // If contracts is empty array, keep it empty
@@ -197,13 +208,22 @@ const ContractManagement = () => {
     navigate('/upload');
   };
 
-  // 下载Excel文件
+  // Download Excel file
   const handleDownloadExcel = (id) => {
     console.log('Download Excel for contract with id:', id);
     window.open(`https://n8n.citictel.com/webhook/contract/excel?id=${id}`, '_blank');
   };
 
   const handleReview = (id) => {
+    console.log('handleReview called with id:', id);
+    console.log('Type of id:', typeof id);
+    
+    if (!id || id === 'undefined' || id === 'null') {
+      console.error('Invalid contract ID:', id);
+      alert('Invalid contract ID. Please refresh the page and try again.');
+      return;
+    }
+    
     // Pass contract ID in URL, review page can get contract details based on ID
     navigate(`/review/${id}`);
   };
@@ -215,7 +235,6 @@ const ContractManagement = () => {
       setContractToDelete(id);
       setDeleteContractInfo({
         code: contract.code,
-        // type字段仍然保留在删除确认对话框中
         type: contract.type,
         status: statusMap[contract.status]?.label || contract.status,
         processDate: contract.processDate ? contract.processDate.split(' ')[0] : ''
@@ -299,153 +318,391 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
     setLogDialogOpen(false);
   };
 
-  const handleChangePage = (event, newPage) => {
-    setPage(newPage);
-    // Load data for new page
+  const handleChangePage = (direction) => {
+    // Load data for new page first, then update state
+    const newPage = direction === 'next' ? page + 1 : page - 1;
     fetchContracts(newPage + 1, rowsPerPage, filters);
+    setPage(newPage);
   };
 
-  const handleChangeRowsPerPage = (event) => {
-    const newRowsPerPage = parseInt(event.target.value, 10);
-    setRowsPerPage(newRowsPerPage);
-    setPage(0);
-    // Load data with new page size
-    fetchContracts(1, newRowsPerPage, filters);
-  };
-
-  return (
-    <Box>
-      <Box sx={{ mb: 3 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={6} md={4}>
-            <TextField
-              fullWidth
-              id="code-filter"
-              name="code"
-              label="Contract Number"
-              value={filters.code}
-              onChange={handleFilterChange}
+  // Mobile card view
+  const renderMobileCard = (contract) => (
+    <Card 
+      key={contract.id} 
+      sx={{ 
+        mb: 2,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+        transition: 'all 0.2s',
+        '&:hover': {
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          transform: 'translateY(-2px)'
+        }
+      }}
+    >
+      <CardContent>
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+            {contract.code}
+          </Typography>
+          <Tooltip title="Tap to view process log" arrow>
+            <Chip
+              label={statusMap[contract.status]?.label || contract.status}
+              color={statusMap[contract.status]?.color || 'default'}
+              size="small"
+              icon={<InfoIcon />}
+              onClick={() => handleStatusHover(contract.id)}
+              sx={{ cursor: 'pointer' }}
             />
-          </Grid>
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl fullWidth>
-              <InputLabel id="status-filter-label">Status</InputLabel>
-              <Select
-                labelId="status-filter-label"
-                id="status-filter"
-                name="status"
-                value={filters.status}
-                label="Status"
-                onChange={handleFilterChange}
-              >
-                <MenuItem value="">All</MenuItem>
-                {Object.entries(statusMap).map(([key, value]) => (
-                  <MenuItem key={key} value={key}>{value.label}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          
-          {/* 移除了Type查询字段 */}
-          
-          <Grid item xs={12} sm={6} md={4}>
-            <Box display="flex" gap={1}>
-              <Button variant="contained" onClick={handleSearch}>
-                REFRESH
-              </Button>
-              <Button
-                variant="contained"
-                color="secondary"
-                startIcon={<UploadIcon />}
-                onClick={handleUpload}
-              >
-                Upload
-              </Button>
-            </Box>
-          </Grid>
-        </Grid>
-      </Box>
-
-      <Box>
-        <Typography variant="h6" gutterBottom>
-          Contract List
+          </Tooltip>
+        </Box>
+        
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          {contract.processDate ? contract.processDate.split(' ')[0] : ''}
         </Typography>
-        <TableContainer component={Paper} sx={{ overflow: "visible" }}>
-          <Table size="small" sx={{'& .MuiTableCell-root': {py: 0.5}}}>
-            <TableHead>
-              <TableRow>
-                <TableCell>Contract Number</TableCell>
-                {/* 移除了Type列 */}
-                <TableCell>Status</TableCell>
-                <TableCell>Process Date</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {(rowsPerPage > 0
-                ? contracts.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                : contracts
-              ).map((contract) => (
-                <TableRow key={contract.id}>
-                  <TableCell>{contract.code}</TableCell>
-                  {/* 移除了Type单元格 */}
-                  <TableCell>
-                    <Tooltip title="Click to view process log" arrow>
-                      <Chip
-                        label={statusMap[contract.status]?.label || contract.status}
-                        color={statusMap[contract.status]?.color || 'default'}
-                        size="small"
-                        icon={<InfoIcon />}
-                        onClick={() => handleStatusHover(contract.id)}
-                        style={{ cursor: 'pointer' }}
-                      />
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>{contract.processDate ? contract.processDate.split(' ')[0] : ''}</TableCell>
-
-                  <TableCell>
-                    <IconButton
-                      color="success"
-                      onClick={() => handleDownloadExcel(contract.id)}
-                      disabled={contract.status !== 'completed' && contract.status !== 'reviewed'}
-                      title="Download Summary"
-                    >
-                      <ExcelIcon />
-                    </IconButton>
-                    <IconButton
-                      color="error"
-                      onClick={() => handleDeleteClick(contract.id)}
-                      title="Delete"
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                    <IconButton
-                      color="secondary"
-                      onClick={() => handleReview(contract.id)}
-                      title="Review"
-                      disabled={contract.status !== 'completed' && contract.status !== 'reviewed'}
-                    >
-                      <ReviewIcon />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <TablePagination
-          rowsPerPageOptions={[5, 10, 25]}
-          component="div"
-          count={totalCount}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-          labelRowsPerPage="Rows per page"
-          labelDisplayedRows={({ from, to, count }) => `${from}-${to} of ${count}`}
-        />
+        
+        {contract.auditor && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Auditor: {contract.auditor}
+          </Typography>
+        )}
+        
+        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+          <Tooltip title="Download Summary">
+            <IconButton
+              color="success"
+              onClick={() => handleDownloadExcel(contract.id)}
+              disabled={contract.status !== 'completed' && contract.status !== 'reviewed'}
+              size="small"
+              sx={{ padding: 0.5 }}
+            >
+              <ExcelIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete">
+            <IconButton
+              color="error"
+              onClick={() => handleDeleteClick(contract.id)}
+              size="small"
+              sx={{ padding: 0.5 }}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Review">
+            <IconButton
+              color="primary"
+              onClick={() => handleReview(contract.id)}
+              disabled={contract.status !== 'completed' && contract.status !== 'reviewed'}
+              size="small"
+              sx={{ padding: 0.5 }}
+            >
+              <ReviewIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+  
+  return (
+    <PageTransition show={showPage}>
+      <Box sx={{
+        pb: 2,
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+      {/* Header */}
+      <Box sx={{ mb: 2 }}>
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          mb: 2,
+          flexWrap: 'wrap',
+          gap: 2
+        }}>
+          <Box>
+            <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main', fontSize: '1.5rem' }}>
+              Contracts
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Manage and review your contracts
+            </Typography>
+          </Box>
+          {!isMobile && (
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<UploadIcon />}
+              onClick={handleUpload}
+              size="small"
+              sx={{ 
+                fontWeight: 600,
+                minWidth: 120,
+                py: 0.75,
+                fontSize: '0.8125rem'
+              }}
+            >
+              Upload New
+            </Button>
+          )}
+        </Box>
+      
+      {/* Filters */}
+      <Card sx={{
+        mb: 2,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+        flexShrink: 0
+      }}>
+        <CardContent sx={{ p: 2 }}>
+          <Grid container spacing={1.5} alignItems="center">
+            <Grid item xs={12} sm={6} md={4}>
+              <TextField
+                fullWidth
+                id="code-filter"
+                name="code"
+                label="Contract Number"
+                value={filters.code}
+                onChange={handleFilterChange}
+                size="small"
+                placeholder="Search by number..."
+                sx={{ fontSize: '0.8125rem' }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="status-filter-label">Status</InputLabel>
+                <Select
+                  labelId="status-filter-label"
+                  id="status-filter"
+                  name="status"
+                  value={filters.status}
+                  label="Status"
+                  onChange={handleFilterChange}
+                >
+                  <MenuItem value="">All Statuses</MenuItem>
+                  {Object.entries(statusMap).map(([key, value]) => (
+                    <MenuItem key={key} value={key}>{value.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} sm={6} md={4}>
+              <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
+                {isMobile && (
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    startIcon={<UploadIcon />}
+                    onClick={handleUpload}
+                    sx={{ 
+                      fontWeight: 600,
+                      minWidth: { xs: 'auto', md: 140 }
+                    }}
+                  >
+                    Upload
+                  </Button>
+                )}
+                <Button
+                  variant="outlined"
+                  onClick={handleSearch}
+                  startIcon={<RefreshIcon />}
+                  size="small"
+                  sx={{ 
+                    fontWeight: 600,
+                    flex: 1,
+                    fontSize: '0.8125rem',
+                    py: 0.5
+                  }}
+                >
+                  Refresh
+                </Button>
+              </Stack>
+            </Grid>
+          </Grid>
+          </CardContent>
+        </Card>
       </Box>
-
+      
+      {/* Table/Card View */}
+      <Card sx={{ boxShadow: '0 2px 12px rgba(0,0,0,0.08)', overflow: 'hidden', flex: 1, minHeight: 0 }}>
+        <CardContent sx={{ p: 0 }}>
+          {isMobile ? (
+            <Box sx={{ p: 2 }}>
+              {contracts.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 8 }}>
+                  <InfoIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+                  <Typography variant="h6" color="text.secondary">
+                    No contracts found
+                  </Typography>
+                  <Typography variant="body2" color="text.disabled" sx={{ mt: 1 }}>
+                    Upload your first contract to get started
+                  </Typography>
+                </Box>
+              ) : (
+                contracts.map(renderMobileCard)
+              )}
+            </Box>
+          ) : (
+            <TableContainer sx={{ overflow: 'auto' }}>
+              <Table sx={{
+                minWidth: 600,
+                tableLayout: 'fixed',
+                '& .MuiTableCell-root': {
+                  py: 0.75,
+                  px: 1.25,
+                },
+                '& .MuiTableCell-head': {
+                  py: 0.75,
+                  fontWeight: 600,
+                  fontSize: '0.8125rem',
+                },
+                '& .MuiTableCell-body': {
+                  fontSize: '0.8125rem',
+                }
+              }}>
+                <TableHead>
+                  <TableRow sx={{ bgcolor: 'background.default' }}>
+                    <TableCell sx={{ fontWeight: 600, width: '30%', fontSize: '0.8125rem' }}>Contract Number</TableCell>        
+                    <TableCell sx={{ fontWeight: 600, width: '15%', fontSize: '0.8125rem' }}>Operator</TableCell>
+                    <TableCell sx={{ fontWeight: 600, width: '20%', fontSize: '0.8125rem' }}>Process Date</TableCell>
+                    <TableCell sx={{ fontWeight: 600, width: '15%', fontSize: '0.8125rem' }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: 600, width: '20%', fontSize: '0.8125rem' }} align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {contracts.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center" sx={{ py: 8 }}>
+                        <Box>
+                          <InfoIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+                          <Typography variant="h6" color="text.secondary">
+                            No contracts found
+                          </Typography>
+                          <Typography variant="body2" color="text.disabled" sx={{ mt: 1 }}>
+                            Upload your first contract to get started
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    contracts.map((contract) => (
+                      <TableRow 
+                        key={contract.id} 
+                        hover
+                        sx={{ 
+                          transition: 'background-color 0.2s',
+                          '&:hover': { bgcolor: 'action.hover' }
+                        }}
+                      >
+                        <TableCell sx={{ fontWeight: 500 }}>{contract.code}</TableCell>
+                        <TableCell sx={{ color: 'text.secondary' }}>{contract.auditor || '-'}</TableCell>
+                        <TableCell>{contract.processDate ? contract.processDate.split(' ')[0] : ''}</TableCell>
+                        <TableCell>
+                          <Tooltip title="Click to view process log" arrow>
+                            <Chip
+                              label={statusMap[contract.status]?.label || contract.status}
+                              color={statusMap[contract.status]?.color || 'default'}
+                              size="small"
+                              icon={<InfoIcon />}
+                              onClick={() => handleStatusHover(contract.id)}
+                              style={{ cursor: 'pointer' }}
+                            />
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Download Summary">
+                            <IconButton
+                              color="success"
+                              onClick={() => handleDownloadExcel(contract.id)}
+                              disabled={contract.status !== 'completed' && contract.status !== 'reviewed'}
+                              size="small"
+                            >
+                              <ExcelIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton
+                              color="error"
+                              onClick={() => handleDeleteClick(contract.id)}
+                              size="small"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Review">
+                            <IconButton
+                              color="primary"
+                              onClick={() => handleReview(contract.id)}
+                              disabled={contract.status !== 'completed' && contract.status !== 'reviewed'}
+                              size="small"
+                            >
+                              <ReviewIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+          
+          {contracts.length > 0 && (
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'center',
+              alignItems: 'center',
+              pt: 2,
+              gap: 2,
+              flexShrink: 0,
+              borderTop: '1px solid',
+              borderColor: 'divider'
+            }}>
+              <Typography variant="body2" color="text.secondary">
+                Showing {Math.min(page * rowsPerPage + 1, totalCount)} - {Math.min((page + 1) * rowsPerPage, totalCount)} of {totalCount}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => handleChangePage('previous')}
+                  disabled={page === 0}
+                  sx={{ minWidth: 80, py: 1, px: 2, fontSize: '0.8125rem' }}
+                >
+                  Previous
+                </Button>
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  px: 1.5,
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  minWidth: 70,
+                  justifyContent: 'center',
+                  height: 32
+                }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8125rem' }}>
+                    {page + 1}
+                  </Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => handleChangePage('next')}
+                  disabled={(page + 1) * rowsPerPage >= totalCount || totalCount === 0}
+                  sx={{ minWidth: 80, py: 1, px: 2, fontSize: '0.8125rem' }}
+                >
+                  Next
+                </Button>
+              </Box>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+      
       {/* Process Log Dialog */}
       <Dialog
         open={logDialogOpen}
@@ -453,17 +710,43 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
         aria-labelledby="log-dialog-title"
         maxWidth="md"
         fullWidth
+        PaperProps={{
+          sx: { borderRadius: 3 }
+        }}
       >
         <DialogTitle id="log-dialog-title">
-          Contract Process Log (ID: {currentContractId})
+          Contract Process Log
         </DialogTitle>
         <DialogContent>
-          <Typography component="pre" sx={{ whiteSpace: 'pre-wrap' }}>
-            {processLog}
-          </Typography>
+          <Box sx={{ 
+            bgcolor: 'grey.50', 
+            p: 2, 
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: 'divider'
+          }}>
+            <Typography component="pre" sx={{ 
+              whiteSpace: 'pre-wrap',
+              fontSize: '0.875rem',
+              fontFamily: 'monospace'
+            }}>
+              {processLog}
+            </Typography>
+          </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseLogDialog}>Close</Button>
+        <DialogActions sx={{ p: 3 }}>
+          <Button 
+            onClick={handleCloseLogDialog}
+            variant="contained"
+            sx={{ 
+              fontWeight: 600,
+              borderRadius: 2,
+              minWidth: 120,
+              fontSize: '0.8125rem'
+            }}
+          >
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
       
@@ -474,80 +757,101 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
         aria-labelledby="delete-dialog-title"
         maxWidth="sm"
         fullWidth
+        PaperProps={{
+          sx: { borderRadius: 3 }
+        }}
       >
-        <DialogTitle id="delete-dialog-title" sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'error.main' }}>
-          <WarningIcon color="error" />
-          <span>Confirm Contract Deletion</span>
+        <DialogTitle 
+          id="delete-dialog-title" 
+          sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 1.5, 
+            color: 'error.main',
+            pb: 1
+          }}
+        >
+          <WarningIcon color="error" sx={{ fontSize: 28 }} />
+          <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '0.8125rem' }}>
+            Confirm Deletion
+          </Typography>
         </DialogTitle>
         <DialogContent>
           <Box sx={{ py: 2 }}>
-            <Typography variant="body1" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
-              Are you sure you want to delete this contract? This action cannot be undone.
-            </Typography>
+            <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
+              This action cannot be undone
+            </Alert>
             
             <Box sx={{ 
-              backgroundColor: 'grey.50', 
+              bgcolor: 'grey.50', 
               p: 2, 
-              borderRadius: 1,
+              borderRadius: 2,
               border: '1px solid',
-              borderColor: 'grey.300',
+              borderColor: 'divider',
               mb: 2
             }}>
               <Grid container spacing={2}>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                     Contract Number:
                   </Typography>
-                  <Typography variant="body1" fontWeight="medium">
+                  <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '0.8125rem' }}>
                     {deleteContractInfo.code}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                     Contract Type:
                   </Typography>
-                  <Typography variant="body1" fontWeight="medium">
+                  <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '0.8125rem' }}>
                     {deleteContractInfo.type}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                     Current Status:
                   </Typography>
-                  <Typography variant="body1" fontWeight="medium">
+                  <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '0.8125rem' }}>
                     {deleteContractInfo.status}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                     Process Date:
                   </Typography>
-                  <Typography variant="body1" fontWeight="medium">
+                  <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '0.8125rem' }}>
                     {deleteContractInfo.processDate}
                   </Typography>
                 </Grid>
               </Grid>
             </Box>
             
-            <Typography variant="body2" color="error" sx={{ 
+            <Typography variant="body2" color="error.dark" sx={{ 
               display: 'flex', 
-              alignItems: 'center', 
+              alignItems: 'flex-start', 
               gap: 1,
-              p: 1.5,
-              backgroundColor: 'error.light',
-              borderRadius: 1,
-              color: 'error.dark'
+              p: 2,
+              bgcolor: 'error.light',
+              borderRadius: 2,
+              fontWeight: 500,
+              fontSize: '0.8125rem'
             }}>
-              <WarningIcon fontSize="small" />
-              <span>Warning: Contract data cannot be recovered after deletion. Please proceed with caution!</span>
+              <WarningIcon fontSize="small" sx={{ mt: 0.3 }} />
+              <span>Contract data cannot be recovered after deletion. Please proceed with caution!</span>
             </Typography>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3 }}>
+        <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
           <Button 
             onClick={handleDeleteDialogClose}
             variant="outlined"
             disabled={isDeleting}
+            sx={{ 
+              fontWeight: 600,
+              borderRadius: 2,
+              minWidth: 100,
+              fontSize: '0.8125rem'
+            }}
           >
             Cancel
           </Button>
@@ -557,6 +861,12 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
             color="error"
             disabled={isDeleting}
             startIcon={isDeleting ? <CircularProgress size={20} color="inherit" /> : <DeleteIcon />}
+            sx={{ 
+              fontWeight: 600,
+              borderRadius: 2,
+              minWidth: 140,
+              fontSize: '0.8125rem'
+            }}
           >
             {isDeleting ? 'Deleting...' : 'Confirm Delete'}
           </Button>
@@ -568,14 +878,18 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
         sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.drawer + 1 }}
         open={isLoading}
       >
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <CircularProgress color="inherit" />
-          <Typography variant="h6" sx={{ mt: 2 }}>
-            Loading data, please wait...
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: 3 }}>
+          <CircularProgress color="inherit" size={60} thickness={4} />
+          <Typography variant="h6" sx={{ mt: 3, fontWeight: 600, fontSize: '0.8125rem' }}>
+            Loading contracts...
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1, opacity: 0.9 }}>
+            Please wait while we fetch your data
           </Typography>
         </Box>
       </Backdrop>
     </Box>
+    </PageTransition>
   );
 };
 
