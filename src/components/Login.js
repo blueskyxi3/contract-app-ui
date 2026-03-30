@@ -128,7 +128,7 @@ function Login() {
             navigate('/contracts');
           }, 500);
         } else {
-          setError('Username or password does not match');
+          setError(result.msg);
         }
       } else {
         setError('Username or password does not match');

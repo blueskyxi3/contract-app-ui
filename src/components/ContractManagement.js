@@ -213,7 +213,10 @@ const ContractManagement = () => {
     console.log('Download Excel for contract with id:', id);
     window.open(`https://n8n.citictel.com/webhook/contract/excel?id=${id}`, '_blank');
   };
-
+  const handleDownloadNonOAExcel = (id) => {
+    console.log('Download Excel for contract with id:', id);
+    window.open(`https://n8n.citictel.com/webhook/contract/excel-nonoa?id=${id}`, '_blank');
+  };
   const handleReview = (id) => {
     console.log('handleReview called with id:', id);
     console.log('Type of id:', typeof id);
@@ -227,6 +230,8 @@ const ContractManagement = () => {
     // Pass contract ID in URL, review page can get contract details based on ID
     navigate(`/review/${id}`);
   };
+
+  
 
   // Open delete confirmation dialog
   const handleDeleteClick = (id) => {
@@ -304,12 +309,13 @@ const ContractManagement = () => {
     }
     
     setProcessLog(`Contract Process Log - ID: ${id}
-Contract Number: ${contract?.code || 'Unknown'}
-Current Status: ${statusText}
-Creation Date: ${contract?.processDate || 'Unknown'}
-Disclosing Party: ${contract?.disclosing_party || 'Unknown'}
-Receiving Party: ${contract?.receiving_party || 'Unknown'}
-Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
+     Contract Number: ${contract?.code || 'Unknown'}
+     Current Status: ${statusText}
+     Creation Date: ${contract?.processDate || 'Unknown'}
+     Disclosing Party: ${contract?.disclosing_party || 'Unknown'}
+     Receiving Party: ${contract?.receiving_party || 'Unknown'}
+     Contract Summary: ${contract?.contract_summary || 'No summary available'}
+     ${contract?.status === 'error' ? `Remarks: ${contract?.remarks || 'No remarks available'}` : ''}`);
     setCurrentContractId(id);
     setLogDialogOpen(true);
   };
@@ -366,7 +372,7 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
           </Typography>
         )}
         
-        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>       
           <Tooltip title="Download Summary">
             <IconButton
               color="success"
@@ -612,7 +618,17 @@ Contract Summary: ${contract?.contract_summary || 'No summary available'}`);
                           </Tooltip>
                         </TableCell>
                         <TableCell align="right">
-                          <Tooltip title="Download Summary">
+                          <Tooltip title="Download Non-OA Summary">
+                            <IconButton
+                              color="success"
+                              onClick={() => handleDownloadNonOAExcel(contract.id)}
+                              disabled={contract.status !== 'completed' && contract.status !== 'reviewed'}
+                              size="small"
+                            >
+                              <ExcelIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Download OA Summary">
                             <IconButton
                               color="success"
                               onClick={() => handleDownloadExcel(contract.id)}

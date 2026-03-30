@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import PageTransition from './PageTransition';
 import {
   Box,
   Card,
@@ -21,6 +22,7 @@ import {
   Chip,
   InputAdornment
 } from '@mui/material';
+import MenuItem from '@mui/material/MenuItem';
 import {
   CloudUpload as UploadIcon,
   Description as FileIcon,
@@ -38,7 +40,9 @@ const ContractUpload = () => {
   const [formData, setFormData] = useState({
     file: null,
     template: 'Confidentiality Agreement',
-    contractNumber: ''
+    contractNumber: '',
+    sanctionStatus: '',
+    sanctionRemarks: ''
   });
   const [errors, setErrors] = useState({});
   const [isUploading, setIsUploading] = useState(false);
@@ -54,6 +58,11 @@ const ContractUpload = () => {
   });
   const [isCheckingContract, setIsCheckingContract] = useState(false);
   const [contractCheckResult, setContractCheckResult] = useState(null);
+  const [showPage, setShowPage] = useState(false);
+
+  useEffect(() => {
+    setShowPage(true);
+  }, []);
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -64,6 +73,23 @@ const ContractUpload = () => {
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
     }
+  };
+
+  const handleSanctionStatusChange = (event) => {
+    const newStatus = event.target.value;
+    setFormData(prev => ({
+      ...prev,
+      sanctionStatus: newStatus,
+      sanctionRemarks: newStatus === 'not_sanctioned' ? generateDefaultSanctionRemark() : ''
+    }));
+  };
+
+  const generateDefaultSanctionRemark = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}年${month}月${day}日，未被制裁`;
   };
 
   const handleBlur = (field) => {
@@ -180,92 +206,140 @@ const ContractUpload = () => {
     if (!formData.file) {
       newErrors.file = 'Please upload contract file';
     }
+    if(!formData.contractNumber){
+       newErrors.contractNumber = 'Please set contract number';
+    }
     setErrors(newErrors);
     setTouched({ file: true, contractNumber: true });
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async () => {
-    // If contract number was entered, always check it first before submitting
-    if (formData.contractNumber.trim()) {
-      // Check if we need to run the contract check
-      if (!contractCheckResult || contractCheckResult.passed !== true) {
-        await handleCheckContract();
-        
-        // If contract check failed after auto-check, stop submission
-        // The helper text will show "FAIL - Contract not found in system"
-        if (contractCheckResult?.passed !== true) {
-          return;
-        }
-      }
-    }
-
-    if (!validateForm()) return;
-
-    setIsUploading(true);
-
+const handleSubmit = async () => {
+  // 如果合同号不为空，先检查合同
+  if (formData.contractNumber.trim()) {
+    let checkPassed = false;
+    
     try {
-      const uploadData = new FormData();
-      uploadData.append('file', formData.file);
-      uploadData.append('template', formData.template);
-      uploadData.append('contractNumber', formData.contractNumber);
-      uploadData.append('auditor', user?.username || '');
+      const response = await fetch(
+        `https://n8n.citictel.com/webhook/eregister-contractno?contractnumber=${formData.contractNumber}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Basic ' + btoa('n8n:n8n123')
+          }
+        }
+      );
 
-      const response = await fetch('https://n8n.citictel.com/webhook/contract-summary', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-        },
-        body: uploadData,
-        mode: 'cors'
-      });
-
-      const responseText = await response.text();
-
-      if (!response.ok) {
-        let errorDetail = responseText;
-        try {
-          const errorData = JSON.parse(responseText);
-          errorDetail = errorData.message || errorData.error || errorData.detail || responseText;
-        } catch {}
-        throw new Error(errorDetail || `Server error: ${response.status}`);
-      }
-
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch {
-        throw new Error('Server returned invalid JSON format');
-      }
-
-      if (result.code >= 400) {
+      const data = await response.json();
+      
+      if (Array.isArray(data) && data.length > 0) {
+        // 合同存在 - 通过
+        setContractCheckResult({
+          passed: true,
+          contractNumber: formData.contractNumber
+        });
+        checkPassed = true;
+      } else {
+        // 合同不存在 - 失败
+        setContractCheckResult({
+          passed: false,
+          contractNumber: formData.contractNumber
+        });
         setShowError({
           show: true,
-          message: result.message || 'Upload failed'
+          message: `Contract ${formData.contractNumber} not found in system - cannot proceed`
         });
-        return;
+        return; // 停止提交
       }
-
-      setShowSuccess(true);
-      setTimeout(() => {
-        setShowSuccess(false);
-        navigate('/contracts');
-      }, 2000);
-
     } catch (error) {
-      console.error('Upload error:', error);
-      const message = error.message?.includes('Failed to fetch')
-        ? 'Network error: Cannot connect to server'
-        : error.message || 'Upload failed';
-      
+      console.error('Contract check error:', error);
+      setContractCheckResult({
+        passed: 'error',
+        contractNumber: formData.contractNumber
+      });
       setShowError({
         show: true,
-        message: message.length > 200 ? message.substring(0, 197) + '...' : message
+        message: `Failed to check contract: ${error.message}`
       });
-    } finally {
-      setIsUploading(false);
+      return; // 停止提交
     }
-  };
+  }
+
+  // 验证表单
+  if (!validateForm()) return;
+
+  setIsUploading(true);
+
+  try {
+    const uploadData = new FormData();
+    uploadData.append('file', formData.file);
+    uploadData.append('template', formData.template);
+    uploadData.append('contractNumber', formData.contractNumber);
+    uploadData.append('auditor', user?.username || '');
+    
+    // 添加制裁检查数据
+    if (formData.sanctionStatus) {
+      uploadData.append('sanction_check', JSON.stringify({
+        status: formData.sanctionStatus,
+        remarks: formData.sanctionRemarks
+      }));
+    }
+    
+    const response = await fetch('https://n8n.citictel.com/webhook/contract-summary', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+      },
+      body: uploadData,
+      mode: 'cors'
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      let errorDetail = responseText;
+      try {
+        const errorData = JSON.parse(responseText);
+        errorDetail = errorData.message || errorData.error || errorData.detail || responseText;
+      } catch {}
+      throw new Error(errorDetail || `Server error: ${response.status}`);
+    }
+
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      throw new Error('Server returned invalid JSON format');
+    }
+
+    if (result.code >= 400) {
+      setShowError({
+        show: true,
+        message: result.message || 'Upload failed'
+      });
+      return;
+    }
+
+    setShowSuccess(true);
+    setTimeout(() => {
+      setShowSuccess(false);
+      navigate('/contracts');
+    }, 2000);
+
+  } catch (error) {
+    console.error('Upload error:', error);
+    const message = error.message?.includes('Failed to fetch')
+      ? 'Network error: Cannot connect to server'
+      : error.message || 'Upload failed';
+    
+    setShowError({
+      show: true,
+      message: message.length > 200 ? message.substring(0, 197) + '...' : message
+    });
+  } finally {
+    setIsUploading(false);
+  }
+};
 
   const handleCancel = () => {
     navigate('/contracts');
@@ -277,8 +351,9 @@ const ContractUpload = () => {
   };
 
   return (
-    <Container maxWidth={isMobile ? 'sm' : 'md'}>
-      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 6 }}>
+    <PageTransition show={showPage}>
+      <Container maxWidth={isMobile ? 'sm' : 'md'}>
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 6 }}>
         <Card 
           sx={{ 
             width: '100%',
@@ -324,12 +399,12 @@ const ContractUpload = () => {
                     onDragOver={handleDrag}
                     onDrop={handleDrop}
                     sx={{
-                      p: { xs: 2, md: 3 },
+                      p: { xs: 1.5, md: 2 },
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexDirection: 'column',
-                      minHeight: { xs: 160, md: 200 },
+                      minHeight: { xs: 120, md: 140 },
                       border: formData.file 
                         ? '2px solid' 
                         : dragActive 
@@ -404,34 +479,35 @@ const ContractUpload = () => {
                       </Box>
                     ) : (
                       <>
-                        <Box 
-                          sx={{ 
+                        <Box
+                          sx={{
                             bgcolor: dragActive ? 'rgba(255,255,255,0.2)' : 'action.selected',
                             borderRadius: '50%',
-                            p: 2,
-                            mb: 2
+                            p: 1.5,
+                            mb: 1.5
                           }}
                         >
-                          <UploadIcon 
-                            sx={{ 
-                              fontSize: 48,
-                              color: dragActive ? 'inherit' : 'primary.main', 
-                            }} 
+                          <UploadIcon
+                            sx={{
+                              fontSize: 36,
+                              color: dragActive ? 'inherit' : 'primary.main',
+                            }}
                           />
                         </Box>
-                        <Typography 
-                          variant="h6" 
-                          sx={{ 
+                        <Typography
+                          variant="body1"
+                          sx={{
                             fontWeight: 600,
-                            mb: 1
+                            mb: 0.5,
+                            fontSize: '1rem'
                           }}
                         >
                           {dragActive ? 'Drop file here' : 'Click or drag file here'}
                         </Typography>
-                        <Typography 
-                          variant="body2" 
+                        <Typography
+                          variant="caption"
                           color={dragActive ? 'inherit' : 'text.secondary'}
-                          sx={{ mb: 2, textAlign: 'center' }}
+                          sx={{ mb: 1.5, textAlign: 'center', display: 'block' }}
                         >
                           Supported formats: PDF, DOC, DOCX
                         </Typography>
@@ -468,7 +544,7 @@ const ContractUpload = () => {
                 </Box>
               </Grid>
 
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
                   id="contractNumber"
@@ -526,8 +602,45 @@ const ContractUpload = () => {
                 />
               </Grid>
 
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  select
+                  id="sanctionStatus"
+                  name="sanctionStatus"
+                  label="制裁状态"
+                  value={formData.sanctionStatus}
+                  onChange={handleSanctionStatusChange}
+                  variant="outlined"
+                  disabled={isUploading}
+                  required
+                  helperText="请选择制裁状态"
+                >
+                  <MenuItem value="not_sanctioned">未被制裁</MenuItem>
+                  <MenuItem value="sanctioned">被制裁</MenuItem>
+                </TextField>
+              </Grid>
+
+              {formData.sanctionStatus && (
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    id="sanctionRemarks"
+                    name="sanctionRemarks"
+                    label="备注"
+                    value={formData.sanctionRemarks}
+                    onChange={handleInputChange}
+                    variant="outlined"
+                    multiline
+                    rows={3}
+                    placeholder={formData.sanctionStatus === 'sanctioned' ? '请输入制裁相关的备注信息' : '日期和备注信息可手动修改'}
+                    disabled={isUploading}
+                  />
+                </Grid>
+              )}
+
               <Grid item xs={12}>
-                <Box sx={{ 
+                <Box sx={{
                   display: 'flex', 
                   justifyContent: 'flex-end', 
                   mt: { xs: 2, md: 3 },
@@ -552,7 +665,7 @@ const ContractUpload = () => {
                   <Button
                     variant="contained"
                     onClick={handleSubmit}
-                    disabled={isUploading || !formData.file || contractCheckResult?.passed === false}
+                    disabled={isUploading || !formData.file || !formData.sanctionStatus || contractCheckResult?.passed === false}
                     startIcon={isUploading ? <CircularProgress size={20} /> : <UploadIcon />}
                     sx={{
                       borderRadius: 2,
@@ -630,6 +743,7 @@ const ContractUpload = () => {
         </Alert>
       </Snackbar>
     </Container>
+    </PageTransition>
   );
 };
 
